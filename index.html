@@ -38,7 +38,8 @@
 
 <!-- Header -->
 <header class="app-header">
-  <div class="header-left">
+   <div class="header-left">
+    <img class="header-logo" src="icon.svg" alt="" aria-hidden="true">
     <h1 class="app-title">StudyLog</h1>
   </div>
   <div class="header-right">
@@ -107,12 +108,6 @@
     </button>
   </div>
 
-  <!-- Add topic -->
-  <button class="add-topic-btn" id="addTopicBtn">
-    <i class="fa-solid fa-plus"></i>
-    <span>Add Topic</span>
-  </button>
-
   <!-- Topic list -->
   <section class="topic-list" id="topicList" aria-live="polite">
     <div class="empty-state">
@@ -128,6 +123,12 @@
   </section>
 
 </main>
+
+<!-- Floating add button -->
+<button class="fab" id="addTopicBtn" aria-label="Add topic">
+  <i class="fa-solid fa-plus"></i>
+  <span class="fab-label">Add</span>
+</button>
 
 <!-- Toast container -->
 <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="false"></div>
