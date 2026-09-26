@@ -137,7 +137,6 @@ button:focus-visible,
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: saturate(180%) blur(12px);
   -webkit-backdrop-filter: saturate(180%) blur(12px);
-  border-bottom: 1px solid var(--line);
 }
 
 .header-left { min-width: 0; }
@@ -235,6 +234,13 @@ button:focus-visible,
   animation: menuIn 0.18s var(--ease);
   max-height: calc(100vh - var(--header-h) - 32px);
   overflow-y: auto;
+  /* Hide scrollbar but keep scrollability */
+  scrollbar-width: none;           /* Firefox */
+  -ms-overflow-style: none;        /* IE/Edge */
+}
+
+.menu-dropdown::-webkit-scrollbar {  /* Chrome/Safari */
+  display: none;
 }
 
 @keyframes menuIn {
