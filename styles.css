@@ -2262,11 +2262,120 @@ mark {
   outline-offset: 2px;
 }
 
-/* Settings footer */
 .settings-footer {
   text-align: center;
   font-size: 11.5px;
   color: var(--muted);
   padding: 24px 0 12px;
   letter-spacing: 0.02em;
+}
+
+/* ============================================================
+   Google Drive block
+   ============================================================ */
+
+.settings-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding-left: 4px;
+}
+
+.settings-section-head .settings-section-title { margin-bottom: 0; padding-left: 0; }
+
+.settings-section-help {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-size: 15px;
+  transition: color 0.15s var(--ease), background 0.15s var(--ease);
+}
+.settings-section-help:hover { color: var(--primary); background: var(--primary-soft); }
+
+.drive-block {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.drive-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.drive-field-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.drive-field input {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--line);
+  background: var(--card-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
+}
+
+.drive-field input:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: var(--card);
+}
+
+.drive-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.drive-btn {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 11px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--card-2);
+  color: var(--text-soft);
+  font-family: var(--font-head);
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid var(--line);
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), transform 0.15s var(--ease);
+}
+
+.drive-btn i { font-size: 12px; }
+.drive-btn:hover { color: var(--text); }
+.drive-btn:active { transform: scale(0.97); }
+.drive-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.drive-btn.primary {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.drive-btn.primary:hover { background: var(--primary-ink); }
+
+.drive-status {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  min-height: 1em;
 }
