@@ -1740,6 +1740,35 @@
           </div>
         </section>
 
+              <section class="settings-section">
+          <div class="settings-section-head">
+            <div class="settings-section-title">Google Drive</div>
+            <button class="settings-section-help" id="driveHelp" aria-label="Help">
+              <i class="fa-solid fa-circle-question"></i>
+            </button>
+          </div>
+          <div class="settings-card">
+            <div class="drive-block">
+              <label class="drive-field">
+                <span class="drive-field-label">OAuth Client ID</span>
+                <input type="text" id="driveClientId" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false" autocapitalize="off">
+              </label>
+              <div class="drive-actions">
+                <button class="drive-btn" data-act="drive-connect" id="driveConnectBtn">
+                  <i class="fa-solid fa-plug"></i><span>Connect</span>
+                </button>
+                <button class="drive-btn primary" data-act="drive-push" id="drivePushBtn">
+                  <i class="fa-solid fa-cloud-arrow-up"></i><span>Push</span>
+                </button>
+                <button class="drive-btn" data-act="drive-pull" id="drivePullBtn">
+                  <i class="fa-solid fa-cloud-arrow-down"></i><span>Pull</span>
+                </button>
+              </div>
+              <div class="drive-status" id="driveStatus">Not connected</div>
+            </div>
+          </div>
+        </section>
+
         ${canInstall ? `
         <section class="settings-section">
           <div class="settings-section-title">App</div>
@@ -1841,6 +1870,26 @@
         }
       });
     });
+
+    // ---- Drive block ----
+    const driveInput = root.querySelector('#driveClientId');
+    driveInput.value = getStoredClientId();
+
+    driveInput.addEventListener('change', () => {
+      setStoredClientId(driveInput.value);
+      updateDriveStatus();
+    });
+    driveInput.addEventListener('blur', () => {
+      setStoredClientId(driveInput.value);
+      updateDriveStatus();
+    });
+
+    root.querySelector('#driveHelp').addEventListener('click', openDriveHelp);
+    root.querySelector('#driveConnectBtn').addEventListener('click', driveConnect);
+    root.querySelector('#drivePushBtn').addEventListener('click', drivePush);
+    root.querySelector('#drivePullBtn').addEventListener('click', drivePull);
+
+    updateDriveStatus();
   }
 
   /* ---------------------------------------------------------- */
@@ -2072,6 +2121,335 @@
       toast('All data cleared', { type: 'success', icon: 'fa-broom' });
     });
   }
+
+  /* ============================================================ */
+  /* Google Drive sync                                            */
+  /* ============================================================ */
+  const DRIVE = {
+    clientIdKey: 'cjay_gdrive_client_id',
+    lastSyncKey: 'studylog_last_sync',
+    folderName: 'StudyLog',
+    fileName: 'studylog.json',
+    scope: 'https://www.googleapis.com/auth/drive.file',
+    token: null,
+    tokenClient: null,
+    gapiReady: false,
+    folderId: null,
+    initPromise: null
+  };
+
+  function getStoredClientId() {
+    return localStorage.getItem(DRIVE.clientIdKey) || '';
+  }
+
+  function setStoredClientId(id) {
+    if (id) localStorage.setItem(DRIVE.clientIdKey, id.trim());
+    else localStorage.removeItem(DRIVE.clientIdKey);
+    // Reset any prepared client so a new ID takes effect
+    DRIVE.tokenClient = null;
+    DRIVE.gapiReady = false;
+    DRIVE.folderId = null;
+    DRIVE.token = null;
+    DRIVE.initPromise = null;
+  }
+
+  function getLastSync() {
+    return localStorage.getItem(DRIVE.lastSyncKey) || '';
+  }
+
+  function setLastSync(iso) {
+    localStorage.setItem(DRIVE.lastSyncKey, iso);
+  }
+
+  function waitForGlobals(timeoutMs = 12000) {
+    return new Promise((resolve, reject) => {
+      const start = Date.now();
+      const check = () => {
+        if (typeof gapi !== 'undefined' &&
+            typeof google !== 'undefined' &&
+            google.accounts &&
+            google.accounts.oauth2) {
+          resolve();
+        } else if (Date.now() - start > timeoutMs) {
+          reject(new Error('Google libraries failed to load'));
+        } else {
+          setTimeout(check, 150);
+        }
+      };
+      check();
+    });
+  }
+
+  function initDrive() {
+    if (DRIVE.initPromise) return DRIVE.initPromise;
+
+    DRIVE.initPromise = (async () => {
+      const clientId = getStoredClientId();
+      if (!clientId) throw new Error('No client ID');
+
+      await waitForGlobals();
+
+      if (!DRIVE.gapiReady) {
+        await new Promise((resolve, reject) => {
+          gapi.load('client', {
+            callback: resolve,
+            onerror: () => reject(new Error('gapi.load failed'))
+          });
+        });
+        await gapi.client.init({
+          discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest']
+        });
+        DRIVE.gapiReady = true;
+      }
+
+      if (!DRIVE.tokenClient) {
+        DRIVE.tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: DRIVE.scope,
+          callback: () => {} // reassigned per request
+        });
+      }
+
+      return true;
+    })();
+
+    // If it fails, allow retry next time
+    DRIVE.initPromise.catch(() => { DRIVE.initPromise = null; });
+
+    return DRIVE.initPromise;
+  }
+
+  function ensureAccessToken({ forcePrompt = false } = {}) {
+    return new Promise((resolve, reject) => {
+      if (DRIVE.token && !forcePrompt) return resolve(DRIVE.token);
+      if (!DRIVE.tokenClient) return reject(new Error('Drive not initialised'));
+
+      DRIVE.tokenClient.callback = (resp) => {
+        if (resp.error) return reject(new Error(resp.error));
+        DRIVE.token = resp.access_token;
+        gapi.client.setToken({ access_token: resp.access_token });
+        resolve(resp.access_token);
+      };
+
+      DRIVE.tokenClient.requestAccessToken({ prompt: forcePrompt ? 'consent' : '' });
+    });
+  }
+
+  async function getOrCreateFolder() {
+    if (DRIVE.folderId) return DRIVE.folderId;
+
+    const q = `mimeType='application/vnd.google-apps.folder' and name='${DRIVE.folderName}' and trashed=false`;
+    const res = await gapi.client.drive.files.list({
+      q, fields: 'files(id,name)', spaces: 'drive'
+    });
+    const files = res.result.files || [];
+    if (files.length) {
+      DRIVE.folderId = files[0].id;
+      return DRIVE.folderId;
+    }
+
+    const create = await gapi.client.drive.files.create({
+      resource: { name: DRIVE.folderName, mimeType: 'application/vnd.google-apps.folder' },
+      fields: 'id'
+    });
+    DRIVE.folderId = create.result.id;
+    return DRIVE.folderId;
+  }
+
+  async function findDriveFile(folderId) {
+    const q = `name='${DRIVE.fileName}' and '${folderId}' in parents and trashed=false`;
+    const res = await gapi.client.drive.files.list({
+      q, fields: 'files(id,name,modifiedTime)', spaces: 'drive'
+    });
+    const files = res.result.files || [];
+    return files[0] || null;
+  }
+
+  async function driveConnect() {
+    try {
+      await initDrive();
+      await ensureAccessToken({ forcePrompt: true });
+      toast('Connected to Drive', { type: 'success', icon: 'fa-plug' });
+      updateDriveStatus();
+    } catch (err) {
+      toast(`Connect failed: ${err.message}`, { type: 'error', icon: 'fa-triangle-exclamation', duration: 6000 });
+    }
+  }
+
+  async function drivePush() {
+    try {
+      await initDrive();
+      await ensureAccessToken();
+      const folderId = await getOrCreateFolder();
+      const file = await findDriveFile(folderId);
+
+      const payload = JSON.stringify({
+        app: 'studylog',
+        schema: 1,
+        exportedAt: new Date().toISOString(),
+        topics: Storage._raw.readAll()
+      }, null, 2);
+
+      const boundary = '-------studylog' + Date.now();
+      const delimiter = '\r\n--' + boundary + '\r\n';
+      const closeDelim = '\r\n--' + boundary + '--';
+
+      const metadata = file
+        ? { name: DRIVE.fileName }
+        : { name: DRIVE.fileName, parents: [folderId] };
+
+      const body =
+        delimiter +
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+        JSON.stringify(metadata) +
+        delimiter +
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+        payload +
+        closeDelim;
+
+      await gapi.client.request({
+        path: file ? `/upload/drive/v3/files/${file.id}` : '/upload/drive/v3/files',
+        method: file ? 'PATCH' : 'POST',
+        params: { uploadType: 'multipart' },
+        headers: { 'Content-Type': `multipart/related; boundary="${boundary}"` },
+        body
+      });
+
+      setLastSync(new Date().toISOString());
+      updateDriveStatus();
+      toast('Pushed to Drive', { type: 'success', icon: 'fa-cloud-arrow-up' });
+    } catch (err) {
+      toast(`Push failed: ${err.message}`, { type: 'error', icon: 'fa-triangle-exclamation', duration: 6000 });
+    }
+  }
+
+  async function drivePull() {
+    try {
+      await initDrive();
+      await ensureAccessToken();
+      const folderId = await getOrCreateFolder();
+      const file = await findDriveFile(folderId);
+
+      if (!file) {
+        toast('No Drive backup found', { type: 'info', icon: 'fa-circle-info' });
+        return;
+      }
+
+      const res = await gapi.client.drive.files.get({
+        fileId: file.id,
+        alt: 'media'
+      });
+
+      // gapi returns raw body as string when alt=media
+      const raw = typeof res.body === 'string' ? res.body : JSON.stringify(res.result);
+      const data = JSON.parse(raw);
+      const incoming = Array.isArray(data) ? data : data.topics;
+
+      if (!Array.isArray(incoming)) throw new Error('Invalid backup file');
+
+      showDrivePullChoice(incoming, file.modifiedTime);
+    } catch (err) {
+      toast(`Pull failed: ${err.message}`, { type: 'error', icon: 'fa-triangle-exclamation', duration: 6000 });
+    }
+  }
+
+  function showDrivePullChoice(incoming, modifiedTime) {
+    const modifiedLabel = modifiedTime
+      ? new Date(modifiedTime).toLocaleString()
+      : 'unknown date';
+
+    const sheet = document.createElement('div');
+    sheet.className = 'modal-sheet confirm-sheet';
+    sheet.innerHTML = `
+      <div class="sheet-handle"></div>
+      <h3 class="sheet-title">Pull from Drive</h3>
+      <p class="sheet-body">
+        Cloud backup has <strong>${incoming.length}</strong> topic${incoming.length === 1 ? '' : 's'}
+        (last modified ${escapeHTML(modifiedLabel)}).
+        How should they be applied?
+      </p>
+      <div class="sheet-actions" style="flex-direction:column;">
+        <button class="btn-primary" data-act="replace">Replace everything</button>
+        <button class="btn-ghost" data-act="merge">Merge with current</button>
+        <button class="btn-ghost" data-act="cancel">Cancel</button>
+      </div>
+    `;
+    openModal(sheet);
+
+    sheet.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
+
+    sheet.querySelector('[data-act="replace"]').addEventListener('click', () => {
+      Storage._raw.writeAll(incoming);
+      setLastSync(new Date().toISOString());
+      closeModal();
+      refreshData();
+      updateDriveStatus();
+      toast(`Restored ${incoming.length} topics`, { type: 'success', icon: 'fa-cloud-arrow-down' });
+    });
+
+    sheet.querySelector('[data-act="merge"]').addEventListener('click', () => {
+      const existing = Storage._raw.readAll();
+      const byId = new Map(existing.map((t) => [t.id, t]));
+      let added = 0, updated = 0;
+      incoming.forEach((t) => {
+        if (byId.has(t.id)) { byId.set(t.id, { ...byId.get(t.id), ...t }); updated++; }
+        else { byId.set(t.id, t); added++; }
+      });
+      Storage._raw.writeAll(Array.from(byId.values()));
+      setLastSync(new Date().toISOString());
+      closeModal();
+      refreshData();
+      updateDriveStatus();
+      toast(`Merged: ${added} new, ${updated} updated`, { type: 'success', icon: 'fa-cloud-arrow-down' });
+    });
+  }
+
+  function updateDriveStatus() {
+    const el = document.getElementById('driveStatus');
+    if (!el) return;
+    const clientId = getStoredClientId();
+    const lastSync = getLastSync();
+
+    if (!clientId) {
+      el.textContent = 'Paste your Client ID to enable sync';
+    } else if (!lastSync) {
+      el.textContent = 'Ready to sync';
+    } else {
+      el.textContent = `Last synced ${relativeTime(lastSync)}`;
+    }
+  }
+
+  function openDriveHelp() {
+    const sheet = document.createElement('div');
+    sheet.className = 'modal-sheet';
+    sheet.innerHTML = `
+      <div class="sheet-handle"></div>
+      <h3 class="sheet-title">Where do I get a Client ID?</h3>
+      <div class="sheet-body" style="line-height:1.6; font-size:13.5px;">
+        <p style="margin:0 0 12px;">StudyLog syncs via Google Drive using an OAuth Client ID you own. It never leaves your device — it's stored only in this browser.</p>
+        <p style="margin:0 0 8px;"><strong>1.</strong> Go to <code>console.cloud.google.com</code> → APIs &amp; Services → Credentials.</p>
+        <p style="margin:0 0 8px;"><strong>2.</strong> Create an <strong>OAuth client ID</strong> of type <em>Web application</em>.</p>
+        <p style="margin:0 0 8px;"><strong>3.</strong> Under <em>Authorized JavaScript origins</em>, add your GitHub Pages URL (and <code>http://localhost</code> for dev).</p>
+        <p style="margin:0 0 8px;"><strong>4.</strong> Copy the Client ID (ends in <code>.apps.googleusercontent.com</code>) and paste it above.</p>
+        <p style="margin:0; color:var(--muted);">If you've already set up Drive sync in another CJay app, reuse the same Client ID.</p>
+      </div>
+      <div class="sheet-actions">
+        <button class="btn-primary" data-act="close">Got it</button>
+      </div>
+    `;
+    openModal(sheet);
+    sheet.querySelector('[data-act="close"]').addEventListener('click', closeModal);
+  }
+
+  /* ---------------------------------------------------------- */
+  /* Public API                                                  */
+  /* ---------------------------------------------------------- */
+  window.StudylogDrive = {
+    init: initDrive,
+    connect: driveConnect,
+    push: drivePush,
+    pull: drivePull
+  };
 
   init();
 
