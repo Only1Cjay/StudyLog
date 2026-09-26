@@ -167,6 +167,7 @@
     modalSlot.appendChild(contentEl);
     modalRoot.hidden = false;
     document.body.style.overflow = 'hidden';
+    document.body.classList.add('modal-open');
   }
 
   function closeModal() {
@@ -174,6 +175,7 @@
     modalRoot.hidden = true;
     modalSlot.innerHTML = '';
     document.body.style.overflow = '';
+    document.body.classList.remove('modal-open');
   }
 
   modalBackdrop.addEventListener('click', closeModal);
@@ -961,6 +963,7 @@
     viewRoot.innerHTML = '';
     viewRoot.hidden = false;
     document.body.style.overflow = 'hidden';
+    document.body.classList.add('view-open');
 
     const el = document.createElement('div');
     el.className = 'view';
@@ -975,6 +978,7 @@
     viewRoot.hidden = true;
     viewRoot.innerHTML = '';
     document.body.style.overflow = '';
+    document.body.classList.remove('view-open');
   }
 
   function viewHeaderHTML(title, rightHTML = '') {
