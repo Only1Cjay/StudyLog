@@ -88,15 +88,15 @@
       case 'search':        openView('search'); break;
       case 'calendar':      openView('calendar'); break;
       case 'history':       openView('history'); break;
+      case 'reports':       openView('reports'); break;
+      case 'settings':      openView('settings'); break;
       case 'tools':         openToolsSheet(); break;
-      case 'reports':       toast('Reports coming in Chunk D', { icon: 'fa-chart-simple' }); break;
-      case 'settings':      toast('Settings coming in Chunk D', { icon: 'fa-gear' }); break;
-      case 'backup':        toast('Backup coming in Chunk D', { icon: 'fa-cloud-arrow-up' }); break;
-      case 'restore':       toast('Restore coming in Chunk D', { icon: 'fa-cloud-arrow-down' }); break;
-      case 'import-csv':    toast('Import coming in Chunk D', { icon: 'fa-file-import' }); break;
+      case 'backup':        backupToFile(); break;
+      case 'restore':       restoreFromFile(); break;
+      case 'import-csv':    importCSVFromFile(); break;
       case 'export-csv':    exportCSV(); break;
       case 'print':         window.print(); break;
-      case 'compact':       document.body.classList.toggle('compact'); break;
+      case 'compact':       toggleCompact(); break;
       case 'clear-completed': clearCompleted(); break;
     }
   }
@@ -605,6 +605,14 @@
   /* ---------------------------------------------------------- */
   /* Clear completed (bulk)                                      */
   /* ---------------------------------------------------------- */
+  function toggleCompact(force) {
+    const next = typeof force === 'boolean'
+      ? force
+      : !document.body.classList.contains('compact');
+    document.body.classList.toggle('compact', next);
+    return next;
+  }
+
   function clearCompleted() {
     const completed = state.topics.filter((t) => Storage.deriveStatus(t) === 'completed');
     if (!completed.length) {
@@ -972,6 +980,8 @@
     if (name === 'search') renderSearchView(el);
     else if (name === 'calendar') renderCalendarView(el, payload);
     else if (name === 'history') renderHistoryView(el, payload);
+    else if (name === 'reports') renderReportsView(el);
+    else if (name === 'settings') renderSettingsView(el);
   }
 
   function closeView() {
@@ -1378,6 +1388,689 @@
 
     renderFilters();
     renderEntries();
+  }
+
+  /* ============================================================ */
+  /* Reports view (Stage 8)                                       */
+  /* ============================================================ */
+  function renderReportsView(root) {
+    root.innerHTML = `
+      ${viewHeaderHTML('Reports')}
+      <div class="view-body" id="reportsBody"></div>
+    `;
+    root.querySelector('[data-act="back"]').addEventListener('click', closeView);
+
+    const body = root.querySelector('#reportsBody');
+    const topics = state.topics;
+    const completions = Storage.getCompletions();
+
+    /* --- Stats block --- */
+    const total = topics.length;
+    const completed = topics.filter((t) => Storage.deriveStatus(t) === 'completed').length;
+    const completionPct = total ? Math.round((completed / total) * 100) : 0;
+    const currentStreak = Storage.getStreak();
+    const longestStreak = computeLongestStreak(completions);
+
+    const statsHTML = `
+      <div class="stats-grid">
+        <div class="stat-tile">
+          <div class="stat-tile-num">${currentStreak}</div>
+          <div class="stat-tile-lbl"><i class="fa-solid fa-fire"></i> Current streak</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-tile-num">${longestStreak}</div>
+          <div class="stat-tile-lbl"><i class="fa-solid fa-trophy"></i> Longest</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-tile-num">${completed}<span class="stat-tile-sub">/${total}</span></div>
+          <div class="stat-tile-lbl"><i class="fa-solid fa-circle-check"></i> Completed</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-tile-num">${completionPct}<span class="stat-tile-sub">%</span></div>
+          <div class="stat-tile-lbl"><i class="fa-solid fa-percent"></i> Progress</div>
+        </div>
+      </div>
+    `;
+
+    /* --- Weekly activity --- */
+    const weeklyHTML = `
+      <section class="report-section">
+        <div class="report-section-head">
+          <h3 class="report-section-title">Activity</h3>
+          <div class="segmented" id="activityRange">
+            <button class="seg-btn active" data-range="7">7d</button>
+            <button class="seg-btn" data-range="30">30d</button>
+          </div>
+        </div>
+        <div class="activity-chart" id="activityChart"></div>
+      </section>
+    `;
+
+    /* --- Subject progress --- */
+    const groups = {};
+    topics.forEach((t) => {
+      const s = t.subject || 'Unlabeled';
+      if (!groups[s]) groups[s] = { total: 0, completed: 0 };
+      groups[s].total += 1;
+      if (Storage.deriveStatus(t) === 'completed') groups[s].completed += 1;
+    });
+
+    const subjectRows = Object.keys(groups).sort().map((s) => {
+      const g = groups[s];
+      const pct = g.total ? Math.round((g.completed / g.total) * 100) : 0;
+      const color = Storage.subjectColor(s);
+      return `
+        <div class="subject-progress-row">
+          <div class="subject-progress-label">
+            <span class="subject-dot" style="background:${color}"></span>
+            <span class="subject-progress-name">${escapeHTML(s)}</span>
+            <span class="subject-progress-count">${g.completed}/${g.total}</span>
+          </div>
+          <div class="prog-track">
+            <div class="prog-fill" style="width:${pct}%; background:${color}"></div>
+          </div>
+        </div>`;
+    }).join('') || `<div class="report-empty">No subjects yet</div>`;
+
+    const subjectHTML = `
+      <section class="report-section">
+        <h3 class="report-section-title">Subject progress</h3>
+        <div class="subject-progress-list">${subjectRows}</div>
+      </section>
+    `;
+
+    /* --- Heatmap --- */
+    const heatmapHTML = `
+      <section class="report-section">
+        <h3 class="report-section-title">Last 90 days</h3>
+        <div class="heatmap-wrap">
+          <div class="heatmap" id="heatmap"></div>
+          <div class="heatmap-legend">
+            <span>Less</span>
+            <span class="heat-cell lvl-0"></span>
+            <span class="heat-cell lvl-1"></span>
+            <span class="heat-cell lvl-2"></span>
+            <span class="heat-cell lvl-3"></span>
+            <span class="heat-cell lvl-4"></span>
+            <span>More</span>
+          </div>
+        </div>
+      </section>
+    `;
+
+    /* --- Stuck topics --- */
+    const stuck = getStuckTopics(14);
+    const stuckHTML = stuck.length ? `
+      <section class="report-section">
+        <h3 class="report-section-title">Needs attention</h3>
+        <div class="stuck-list">
+          ${stuck.map((t) => {
+            const color = Storage.subjectColor(t.subject);
+            const days = daysSinceEarliestStep(t);
+            return `
+              <button class="stuck-item" data-topic-id="${t.id}">
+                <span class="subject-dot" style="background:${color}"></span>
+                <span class="stuck-item-body">
+                  <span class="stuck-item-topic">${escapeHTML(t.topic)}</span>
+                  <span class="stuck-item-sub">${escapeHTML(t.subject)} · ${Storage.stepsDoneCount(t)}/4 done</span>
+                </span>
+                <span class="stuck-item-days">${days}d</span>
+              </button>`;
+          }).join('')}
+        </div>
+      </section>
+    ` : '';
+
+    body.innerHTML = statsHTML + weeklyHTML + subjectHTML + heatmapHTML + stuckHTML;
+
+    /* --- Wire activity chart --- */
+    let activityRange = 7;
+    const activityChart = body.querySelector('#activityChart');
+
+    function renderActivity() {
+      const days = [];
+      for (let i = activityRange - 1; i >= 0; i--) {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - i);
+        days.push(d);
+      }
+
+      const counts = days.map((d) => {
+        const dayStart = d.getTime();
+        const dayEnd = dayStart + 86400000;
+        return completions.filter((c) => {
+          const t = new Date(c.at).getTime();
+          return t >= dayStart && t < dayEnd;
+        }).length;
+      });
+
+      const max = Math.max(1, ...counts);
+
+      activityChart.innerHTML = days.map((d, i) => {
+        const pct = (counts[i] / max) * 100;
+        const isToday = i === days.length - 1;
+        const label = d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 1);
+        const dateNum = d.getDate();
+        return `
+          <div class="activity-col">
+            <div class="activity-bar-wrap" title="${counts[i]} on ${d.toLocaleDateString()}">
+              <div class="activity-bar ${counts[i] ? '' : 'empty'} ${isToday ? 'today' : ''}" style="height:${counts[i] ? Math.max(pct, 8) : 3}%"></div>
+            </div>
+            <div class="activity-label">${activityRange <= 7 ? label : (dateNum % 5 === 1 ? dateNum : '')}</div>
+          </div>`;
+      }).join('');
+    }
+
+    body.querySelectorAll('#activityRange .seg-btn').forEach((b) => {
+      b.addEventListener('click', () => {
+        activityRange = Number(b.dataset.range);
+        body.querySelectorAll('#activityRange .seg-btn').forEach((x) => x.classList.remove('active'));
+        b.classList.add('active');
+        renderActivity();
+      });
+    });
+
+    renderActivity();
+
+    /* --- Heatmap render --- */
+    renderHeatmap(body.querySelector('#heatmap'), completions);
+
+    /* --- Stuck topic tap --- */
+    body.querySelectorAll('.stuck-item').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.topicId;
+        closeView();
+        setTimeout(() => openDetail(id), 100);
+      });
+    });
+  }
+
+  /* ---------------------------------------------------------- */
+  /* Report helpers                                              */
+  /* ---------------------------------------------------------- */
+  function computeLongestStreak(completions) {
+    if (!completions.length) return 0;
+    const days = Array.from(new Set(
+      completions.map((c) => c.at.slice(0, 10))
+    )).sort();
+
+    let longest = 1;
+    let run = 1;
+    for (let i = 1; i < days.length; i++) {
+      const prev = new Date(days[i - 1] + 'T00:00:00Z').getTime();
+      const cur = new Date(days[i] + 'T00:00:00Z').getTime();
+      if (cur - prev === 86400000) {
+        run++;
+        if (run > longest) longest = run;
+      } else {
+        run = 1;
+      }
+    }
+    return longest;
+  }
+
+  function getStuckTopics(daysThreshold) {
+    const cutoff = Date.now() - daysThreshold * 86400000;
+    return state.topics.filter((t) => {
+      if (Storage.deriveStatus(t) !== 'inprogress') return false;
+      const times = Storage.STEP_KEYS
+        .map((k) => t.steps[k].at)
+        .filter(Boolean)
+        .map((s) => new Date(s).getTime());
+      if (!times.length) return false;
+      return Math.min(...times) < cutoff;
+    });
+  }
+
+  function daysSinceEarliestStep(t) {
+    const times = Storage.STEP_KEYS
+      .map((k) => t.steps[k].at)
+      .filter(Boolean)
+      .map((s) => new Date(s).getTime());
+    if (!times.length) return 0;
+    return Math.floor((Date.now() - Math.min(...times)) / 86400000);
+  }
+
+  function renderHeatmap(container, completions) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Start from Sunday on or before 90 days ago
+    const start = new Date(today);
+    start.setDate(start.getDate() - 89);
+    start.setDate(start.getDate() - start.getDay());
+
+    const counts = {};
+    completions.forEach((c) => {
+      const d = new Date(c.at);
+      d.setHours(0, 0, 0, 0);
+      const k = d.toISOString().slice(0, 10);
+      counts[k] = (counts[k] || 0) + 1;
+    });
+
+    const cells = [];
+    const cursor = new Date(start);
+    while (cursor <= today) {
+      const k = cursor.toISOString().slice(0, 10);
+      const n = counts[k] || 0;
+      let lvl = 0;
+      if (n >= 1 && n <= 2) lvl = 1;
+      else if (n >= 3 && n <= 5) lvl = 2;
+      else if (n >= 6 && n <= 9) lvl = 3;
+      else if (n >= 10) lvl = 4;
+
+      cells.push(`<span class="heat-cell lvl-${lvl}" title="${cursor.toDateString()} — ${n} completion${n === 1 ? '' : 's'}"></span>`);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    container.innerHTML = cells.join('');
+  }
+
+  /* ============================================================ */
+  /* Settings view (Stage 9)                                      */
+  /* ============================================================ */
+  function renderSettingsView(root) {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const isCompact = document.body.classList.contains('compact');
+    const canInstall = !!deferredPrompt;
+
+    root.innerHTML = `
+      ${viewHeaderHTML('Settings')}
+      <div class="view-body">
+
+        <section class="settings-section">
+          <div class="settings-section-title">Appearance</div>
+          <div class="settings-card">
+            <div class="toggle-row">
+              <div class="toggle-text">
+                <div class="toggle-title">Dark mode</div>
+                <div class="toggle-sub">Easier on the eyes at night</div>
+              </div>
+              <button class="switch" id="setTheme" role="switch" aria-checked="${isDark}">
+                <span></span>
+              </button>
+            </div>
+            <div class="toggle-row">
+              <div class="toggle-text">
+                <div class="toggle-title">Compact view</div>
+                <div class="toggle-sub">Hide progress bars and steps</div>
+              </div>
+              <button class="switch" id="setCompact" role="switch" aria-checked="${isCompact}">
+                <span></span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-section-title">Data</div>
+          <div class="settings-card">
+            <button class="settings-row" data-act="backup">
+              <i class="fa-solid fa-cloud-arrow-up"></i>
+              <div class="settings-row-text">
+                <div class="settings-row-title">Backup to file</div>
+                <div class="settings-row-sub">Download a JSON snapshot</div>
+              </div>
+              <i class="fa-solid fa-chevron-right settings-row-chevron"></i>
+            </button>
+            <button class="settings-row" data-act="restore">
+              <i class="fa-solid fa-cloud-arrow-down"></i>
+              <div class="settings-row-text">
+                <div class="settings-row-title">Restore from file</div>
+                <div class="settings-row-sub">Load a JSON backup</div>
+              </div>
+              <i class="fa-solid fa-chevron-right settings-row-chevron"></i>
+            </button>
+            <button class="settings-row" data-act="import-csv">
+              <i class="fa-solid fa-file-import"></i>
+              <div class="settings-row-text">
+                <div class="settings-row-title">Import from CSV</div>
+                <div class="settings-row-sub">Bring in data from your old Sheet</div>
+              </div>
+              <i class="fa-solid fa-chevron-right settings-row-chevron"></i>
+            </button>
+            <button class="settings-row" data-act="export-csv">
+              <i class="fa-solid fa-file-export"></i>
+              <div class="settings-row-text">
+                <div class="settings-row-title">Export as CSV</div>
+                <div class="settings-row-sub">Spreadsheet-friendly download</div>
+              </div>
+              <i class="fa-solid fa-chevron-right settings-row-chevron"></i>
+            </button>
+          </div>
+        </section>
+
+        ${canInstall ? `
+        <section class="settings-section">
+          <div class="settings-section-title">App</div>
+          <div class="settings-card">
+            <button class="settings-row" data-act="install">
+              <i class="fa-solid fa-circle-down"></i>
+              <div class="settings-row-text">
+                <div class="settings-row-title">Install StudyLog</div>
+                <div class="settings-row-sub">Add to your home screen</div>
+              </div>
+              <i class="fa-solid fa-chevron-right settings-row-chevron"></i>
+            </button>
+          </div>
+        </section>
+        ` : ''}
+
+        <section class="settings-section">
+          <div class="settings-section-title">Danger zone</div>
+          <div class="settings-card">
+            <button class="settings-row danger" data-act="clear-completed">
+              <i class="fa-solid fa-broom"></i>
+              <div class="settings-row-text">
+                <div class="settings-row-title">Clear completed</div>
+                <div class="settings-row-sub">Remove all fully-finished topics</div>
+              </div>
+              <i class="fa-solid fa-chevron-right settings-row-chevron"></i>
+            </button>
+            <button class="settings-row danger" data-act="reset-all">
+              <i class="fa-solid fa-triangle-exclamation"></i>
+              <div class="settings-row-text">
+                <div class="settings-row-title">Reset all data</div>
+                <div class="settings-row-sub">Permanently delete everything</div>
+              </div>
+              <i class="fa-solid fa-chevron-right settings-row-chevron"></i>
+            </button>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-section-title">About</div>
+          <div class="settings-card">
+            <div class="settings-row static">
+              <i class="fa-solid fa-code-branch"></i>
+              <div class="settings-row-text">
+                <div class="settings-row-title">Version</div>
+                <div class="settings-row-sub" id="appVersion">Loading…</div>
+              </div>
+            </div>
+            <div class="settings-row static">
+              <i class="fa-solid fa-database"></i>
+              <div class="settings-row-text">
+                <div class="settings-row-title">Stored locally</div>
+                <div class="settings-row-sub">Your data never leaves this device</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="settings-footer">StudyLog · Made with care</div>
+      </div>
+    `;
+
+    root.querySelector('[data-act="back"]').addEventListener('click', closeView);
+
+    // Load version async
+    getAppVersion().then((v) => {
+      const el = root.querySelector('#appVersion');
+      if (el) el.textContent = v;
+    });
+
+    // Theme toggle
+    root.querySelector('#setTheme').addEventListener('click', (e) => {
+      const btn = e.currentTarget;
+      const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      localStorage.setItem(LS.theme, next);
+      applyTheme(next);
+      btn.setAttribute('aria-checked', String(next === 'dark'));
+    });
+
+    // Compact toggle
+    root.querySelector('#setCompact').addEventListener('click', (e) => {
+      const btn = e.currentTarget;
+      const next = toggleCompact();
+      btn.setAttribute('aria-checked', String(next));
+    });
+
+    // Settings rows
+    root.querySelectorAll('.settings-row[data-act]').forEach((row) => {
+      row.addEventListener('click', () => {
+        const act = row.dataset.act;
+        if (act === 'backup') backupToFile();
+        else if (act === 'restore') restoreFromFile();
+        else if (act === 'import-csv') importCSVFromFile();
+        else if (act === 'export-csv') exportCSV();
+        else if (act === 'clear-completed') clearCompleted();
+        else if (act === 'reset-all') confirmResetAll();
+        else if (act === 'install') {
+          installBanner.hidden = false;
+        }
+      });
+    });
+  }
+
+  /* ---------------------------------------------------------- */
+  /* Version (reads CACHE_VERSION from sw.js)                    */
+  /* ---------------------------------------------------------- */
+  async function getAppVersion() {
+    try {
+      const res = await fetch(`sw.js?t=${Date.now()}`, { cache: 'no-store' });
+      const text = await res.text();
+      const m = text.match(/CACHE_VERSION\s*=\s*['"]([^'"]+)['"]/);
+      return m ? `v${m[1].replace(/^v/, '')}` : 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  /* ---------------------------------------------------------- */
+  /* Backup / restore / import                                   */
+  /* ---------------------------------------------------------- */
+  function backupToFile() {
+    const payload = {
+      app: 'studylog',
+      schema: 1,
+      exportedAt: new Date().toISOString(),
+      topics: Storage._raw.readAll()
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `studylog-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Backup saved', { type: 'success', icon: 'fa-cloud-arrow-up' });
+  }
+
+  function restoreFromFile() {
+    pickFile('.json,application/json', async (file) => {
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        const incoming = Array.isArray(data) ? data : data.topics;
+        if (!Array.isArray(incoming)) throw new Error('Invalid backup file');
+
+        showRestoreChoice(incoming);
+      } catch (err) {
+        toast('Could not read file', { type: 'error', icon: 'fa-triangle-exclamation' });
+      }
+    });
+  }
+
+  function showRestoreChoice(incoming) {
+    const sheet = document.createElement('div');
+    sheet.className = 'modal-sheet confirm-sheet';
+    sheet.innerHTML = `
+      <div class="sheet-handle"></div>
+      <h3 class="sheet-title">Restore backup</h3>
+      <p class="sheet-body">
+        The file contains <strong>${incoming.length}</strong> topic${incoming.length === 1 ? '' : 's'}.
+        How should they be applied?
+      </p>
+      <div class="sheet-actions" style="flex-direction:column;">
+        <button class="btn-primary" data-act="replace">Replace everything</button>
+        <button class="btn-ghost" data-act="merge">Merge with current</button>
+        <button class="btn-ghost" data-act="cancel">Cancel</button>
+      </div>
+    `;
+    openModal(sheet);
+
+    sheet.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
+
+    sheet.querySelector('[data-act="replace"]').addEventListener('click', () => {
+      Storage._raw.writeAll(incoming);
+      closeModal();
+      refreshData();
+      toast(`Restored ${incoming.length} topics`, { type: 'success', icon: 'fa-cloud-arrow-down' });
+    });
+
+    sheet.querySelector('[data-act="merge"]').addEventListener('click', () => {
+      const existing = Storage._raw.readAll();
+      const byId = new Map(existing.map((t) => [t.id, t]));
+      let added = 0, updated = 0;
+      incoming.forEach((t) => {
+        if (byId.has(t.id)) { byId.set(t.id, { ...byId.get(t.id), ...t }); updated++; }
+        else { byId.set(t.id, t); added++; }
+      });
+      Storage._raw.writeAll(Array.from(byId.values()));
+      closeModal();
+      refreshData();
+      toast(`Merged: ${added} new, ${updated} updated`, { type: 'success', icon: 'fa-cloud-arrow-down' });
+    });
+  }
+
+  function importCSVFromFile() {
+    pickFile('.csv,text/csv', async (file) => {
+      try {
+        const text = await file.text();
+        const rows = parseCSV(text);
+        if (!rows.length) throw new Error('Empty file');
+
+        const header = rows[0].map((h) => h.trim());
+        const idx = (name) => header.findIndex((h) => h.toLowerCase() === name.toLowerCase());
+
+        const iSub = idx('Subject');
+        const iTop = idx('Topic');
+        const iBlind = idx('Blind Recon');
+        const iDeep = idx('Deep Read');
+        const iBlurt = idx('Blurted');
+        const iAnki = idx('Anki Digitized');
+        const iNotes = idx('Notes');
+        const iUpdated = idx('Last Updated');
+
+        if (iSub === -1 || iTop === -1) throw new Error('Missing required columns');
+
+        const truthy = (v) => String(v).trim().toLowerCase() === 'true';
+
+        const imported = [];
+        rows.slice(1).forEach((r) => {
+          const subject = (r[iSub] || '').trim();
+          const topic = (r[iTop] || '').trim();
+          if (!subject || !topic) return;
+
+          const at = iUpdated !== -1 && r[iUpdated] ? r[iUpdated] : new Date().toISOString();
+          const steps = {
+            blindRecon:    { done: iBlind !== -1 && truthy(r[iBlind]), at: iBlind !== -1 && truthy(r[iBlind]) ? at : null },
+            deepRead:      { done: iDeep  !== -1 && truthy(r[iDeep]),  at: iDeep  !== -1 && truthy(r[iDeep])  ? at : null },
+            blurted:       { done: iBlurt !== -1 && truthy(r[iBlurt]), at: iBlurt !== -1 && truthy(r[iBlurt]) ? at : null },
+            ankiDigitized: { done: iAnki  !== -1 && truthy(r[iAnki]),  at: iAnki  !== -1 && truthy(r[iAnki])  ? at : null }
+          };
+
+          imported.push({
+            id: crypto.randomUUID ? crypto.randomUUID() : `csv-${Date.now()}-${imported.length}`,
+            subject, topic,
+            steps,
+            notes: iNotes !== -1 ? (r[iNotes] || '') : '',
+            createdAt: at,
+            updatedAt: at
+          });
+        });
+
+        if (!imported.length) throw new Error('No valid rows found');
+
+        const existing = Storage._raw.readAll();
+        Storage._raw.writeAll(existing.concat(imported));
+        refreshData();
+        toast(`Imported ${imported.length} topics`, { type: 'success', icon: 'fa-file-import' });
+      } catch (err) {
+        toast(`Import failed: ${err.message}`, { type: 'error', icon: 'fa-triangle-exclamation', duration: 6000 });
+      }
+    });
+  }
+
+  function pickFile(accept, onPick) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.style.display = 'none';
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (file) onPick(file);
+      input.remove();
+    });
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  function parseCSV(text) {
+    const rows = [];
+    let row = [];
+    let cur = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { cur += '"'; i++; }
+          else inQuotes = false;
+        } else cur += c;
+      } else {
+        if (c === '"') inQuotes = true;
+        else if (c === ',') { row.push(cur); cur = ''; }
+        else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+        else if (c === '\r') { /* skip */ }
+        else cur += c;
+      }
+    }
+    if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+    return rows.filter((r) => r.some((c) => c.length));
+  }
+
+  /* ---------------------------------------------------------- */
+  /* Reset all data                                              */
+  /* ---------------------------------------------------------- */
+  function confirmResetAll() {
+    const sheet = document.createElement('div');
+    sheet.className = 'modal-sheet confirm-sheet';
+    sheet.innerHTML = `
+      <div class="sheet-handle"></div>
+      <h3 class="sheet-title">Reset all data?</h3>
+      <p class="sheet-body">
+        This will permanently delete <strong>every topic</strong> from this device.
+        This cannot be undone. Back up first if you're unsure.
+      </p>
+      <label class="confirm-input-label">
+        Type <code>DELETE</code> to confirm
+        <input type="text" id="confirmResetInput" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      </label>
+      <div class="sheet-actions">
+        <button class="btn-ghost" data-act="cancel">Cancel</button>
+        <button class="btn-danger" data-act="confirm" disabled>Reset</button>
+      </div>
+    `;
+    openModal(sheet);
+
+    const input = sheet.querySelector('#confirmResetInput');
+    const confirmBtn = sheet.querySelector('[data-act="confirm"]');
+
+    input.addEventListener('input', () => {
+      confirmBtn.disabled = input.value.trim().toUpperCase() !== 'DELETE';
+    });
+
+    sheet.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
+    confirmBtn.addEventListener('click', () => {
+      Storage._raw.writeAll([]);
+      closeModal();
+      closeView();
+      refreshData();
+      toast('All data cleared', { type: 'success', icon: 'fa-broom' });
+    });
   }
 
   init();
