@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2F6F4E">
+<meta name="description" content="CJay's Study Tracker — track topics through Blind Recon, Deep Read, Blurt, and Anki Digitization.">
+<title>CJay's Study Tracker</title>
+
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+<script>
+  // Inline theme loader — prevents flash of wrong theme
+  (function(){
+    try {
+      var t = localStorage.getItem('studylog.theme') || 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    } catch(e){}
+  })();
+</script>
+
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Offline banner -->
+<div class="offline-banner" id="offlineBanner" role="status" aria-live="polite">
+  <i class="fa-solid fa-wifi"></i>
+  <span>You're offline — changes will still save locally</span>
+</div>
+
+<!-- Header -->
+<header class="app-header">
+  <div class="header-left">
+    <h1 class="app-title">CJay's Study Tracker</h1>
+  </div>
+  <div class="header-right">
+    <button class="streak-chip" id="streakChip" aria-label="Current streak" title="Current streak">
+      <i class="fa-solid fa-fire"></i>
+      <span id="streakCount">0</span>
+    </button>
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle theme" title="Toggle theme">
+      <i class="fa-solid fa-moon" id="themeIcon"></i>
+    </button>
+    <button class="icon-btn has-badge" id="menuBtn" aria-label="Open menu" title="Menu" aria-expanded="false">
+      <i class="fa-solid fa-bars"></i>
+      <span class="icon-badge" id="menuBadge" hidden></span>
+    </button>
+  </div>
+</header>
+
+<!-- Menu dropdown -->
+<nav class="menu-dropdown" id="menuDropdown" hidden aria-label="Main menu">
+  <button class="menu-item" data-action="search">
+    <i class="fa-solid fa-magnifying-glass"></i><span>Search</span>
+  </button>
+  <button class="menu-item" data-action="calendar">
+    <i class="fa-regular fa-calendar"></i><span>Calendar</span>
+  </button>
+  <button class="menu-item" data-action="history">
+    <i class="fa-solid fa-clock-rotate-left"></i><span>History</span>
+  </button>
+  <button class="menu-item" data-action="reports">
+    <i class="fa-solid fa-chart-simple"></i><span>Reports</span>
+  </button>
+  <button class="menu-item" data-action="settings">
+    <i class="fa-solid fa-gear"></i><span>Settings</span>
+  </button>
+  <div class="menu-divider"></div>
+  <div class="menu-label">Tools</div>
+  <button class="menu-item menu-item-sub" data-action="backup">
+    <i class="fa-solid fa-cloud-arrow-up"></i><span>Backup</span>
+  </button>
+  <button class="menu-item menu-item-sub" data-action="restore">
+    <i class="fa-solid fa-cloud-arrow-down"></i><span>Restore</span>
+  </button>
+  <button class="menu-item menu-item-sub" data-action="import-csv">
+    <i class="fa-solid fa-file-import"></i><span>Import CSV</span>
+  </button>
+  <button class="menu-item menu-item-sub" data-action="export-csv">
+    <i class="fa-solid fa-file-export"></i><span>Export CSV</span>
+  </button>
+  <button class="menu-item menu-item-sub" data-action="print">
+    <i class="fa-solid fa-print"></i><span>Print</span>
+  </button>
+  <button class="menu-item menu-item-sub" data-action="compact">
+    <i class="fa-solid fa-list"></i><span>Compact View</span>
+  </button>
+  <button class="menu-item menu-item-sub danger" data-action="clear-completed">
+    <i class="fa-solid fa-trash-can"></i><span>Clear Completed</span>
+  </button>
+</nav>
+<div class="menu-backdrop" id="menuBackdrop" hidden></div>
+
+<!-- Main -->
+<main class="app-main">
+
+  <!-- Summary cards -->
+  <section class="summary-row" aria-label="Summary">
+    <button class="summary-card" data-filter="all" aria-pressed="true">
+      <div class="summary-num" id="statTotal">0</div>
+      <div class="summary-lbl">Topics</div>
+    </button>
+    <button class="summary-card" data-filter="completed" aria-pressed="false">
+      <div class="summary-num" id="statDone">0</div>
+      <div class="summary-lbl">Completed</div>
+    </button>
+    <button class="summary-card" data-filter="inprogress" aria-pressed="false">
+      <div class="summary-num" id="statProg">0</div>
+      <div class="summary-lbl">In Progress</div>
+    </button>
+  </section>
+
+  <!-- Active filter chip -->
+  <div class="filter-chip-row" id="filterChipRow" hidden>
+    <button class="filter-chip" id="filterChip">
+      <span id="filterChipLabel">Filtered</span>
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+  </div>
+
+  <!-- Add topic -->
+  <button class="add-topic-btn" id="addTopicBtn">
+    <i class="fa-solid fa-plus"></i>
+    <span>Add Topic</span>
+  </button>
+
+  <!-- Topic list -->
+  <section class="topic-list" id="topicList" aria-live="polite">
+    <div class="empty-state">
+      <svg class="empty-icon" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="24" y="30" width="72" height="60" rx="8" stroke="currentColor" stroke-width="3"/>
+        <path d="M24 46h72" stroke="currentColor" stroke-width="3"/>
+        <path d="M40 30v16M80 30v16" stroke="currentColor" stroke-width="3"/>
+        <path d="M48 66h24M48 76h16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+      </svg>
+      <div class="empty-title">No topics yet</div>
+      <div class="empty-sub">Tap <strong>Add Topic</strong> to start tracking.</div>
+    </div>
+  </section>
+
+  <footer class="app-footer">
+    <div class="credit">Made by Only1Cjay of Pharm250</div>
+  </footer>
+
+</main>
+
+<!-- Toast container -->
+<div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="false"></div>
+
+<!-- Modal container -->
+<div class="modal-root" id="modalRoot" hidden>
+  <div class="modal-backdrop" id="modalBackdrop"></div>
+  <div class="modal-slot" id="modalSlot"></div>
+</div>
+
+<!-- Install banner -->
+<div class="install-banner" id="installBanner" hidden>
+  <i class="fa-solid fa-circle-down"></i>
+  <div class="install-text">
+    <strong>Install Studylog</strong>
+    <span>Add to your home screen for quick access</span>
+  </div>
+  <button class="install-btn" id="installAccept">Install</button>
+  <button class="install-dismiss" id="installDismiss" aria-label="Dismiss">
+    <i class="fa-solid fa-xmark"></i>
+  </button>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
