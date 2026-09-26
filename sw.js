@@ -3,7 +3,7 @@
    Bump CACHE_VERSION on every deploy.
    ============================================================ */
 
-const CACHE_VERSION = 'v1.0.2';
+const CACHE_VERSION = 'v1.1.2';
 const CACHE_NAME = `studylog-${CACHE_VERSION}`;
 
 const SHELL = [
@@ -52,6 +52,12 @@ self.addEventListener('fetch', (event) => {
   // Only handle http(s)
   const url = new URL(req.url);
   if (!url.protocol.startsWith('http')) return;
+
+  // Never intercept Google API/identity calls — auth responses must not be cached
+  if (url.hostname.endsWith('googleapis.com') ||
+      url.hostname === 'accounts.google.com') {
+    return;
+  }
 
   event.respondWith(
     caches.match(req).then((cached) => {
