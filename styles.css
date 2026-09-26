@@ -87,6 +87,18 @@ html, body {
   padding: 0;
 }
 
+html {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+html::-webkit-scrollbar { display: none; }
+
+body {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+body::-webkit-scrollbar { display: none; }
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -139,7 +151,20 @@ button:focus-visible,
   -webkit-backdrop-filter: saturate(180%) blur(12px);
 }
 
-.header-left { min-width: 0; }
+.header-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  display: block;
+}
 
 .app-title {
   font-size: 17px;
@@ -303,7 +328,7 @@ button:focus-visible,
 .app-main {
   max-width: var(--max-w);
   margin: 0 auto;
-  padding: 18px 16px 40px;
+  padding: 18px 16px 120px;
 }
 
 /* Summary cards */
@@ -380,28 +405,44 @@ button:focus-visible,
 .filter-chip i { font-size: 11px; }
 .filter-chip:active { transform: scale(0.95); }
 
-/* Add topic button */
-.add-topic-btn {
-  display: flex;
+/* FAB — floating add button */
+.fab {
+  position: fixed;
+  right: 18px;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 55;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
-  width: 100%;
-  padding: 15px;
+  gap: 8px;
+  padding: 14px 20px;
   border-radius: var(--radius-pill);
   background: var(--primary);
   color: #fff;
   font-family: var(--font-head);
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.01em;
-  box-shadow: 0 6px 20px color-mix(in srgb, var(--primary) 30%, transparent);
-  margin-bottom: 18px;
-  transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease), background 0.18s var(--ease);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--primary) 40%, transparent),
+              0 2px 6px rgba(0, 0, 0, 0.08);
+  transition: transform 0.18s var(--ease), background 0.18s var(--ease), opacity 0.2s var(--ease);
 }
 
-.add-topic-btn:hover { background: var(--primary-ink); }
-.add-topic-btn:active { transform: scale(0.98); }
+.fab i { font-size: 13px; }
+
+.fab:hover { background: var(--primary-ink); }
+.fab:active { transform: scale(0.95); }
+
+/* Hide the FAB when a view or modal is open */
+body.view-open .fab,
+body.modal-open .fab {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+}
+
+@media (min-width: 720px) {
+  .fab { right: 28px; bottom: 28px; }
+}
 
 /* Topic list */
 .topic-list {
