@@ -67,9 +67,10 @@
 
   menuBackdrop.addEventListener('click', closeMenu);
 
-  document.addEventListener('keydown', (e) => {
+   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       closeMenu();
+      if (!$('#viewRoot').hidden) { closeView(); return; }
       closeModal();
     }
   });
@@ -84,14 +85,15 @@
 
   function handleMenuAction(action) {
     switch (action) {
-      case 'search':        toast('Search coming in Stage 5', { icon: 'fa-magnifying-glass' }); break;
-      case 'calendar':      toast('Calendar coming in Stage 6', { icon: 'fa-calendar' }); break;
-      case 'history':       toast('History coming in Stage 7', { icon: 'fa-clock-rotate-left' }); break;
-      case 'reports':       toast('Reports coming in Stage 8', { icon: 'fa-chart-simple' }); break;
-      case 'settings':      toast('Settings coming in Stage 9', { icon: 'fa-gear' }); break;
-      case 'backup':        toast('Backup coming in Stage 9', { icon: 'fa-cloud-arrow-up' }); break;
-      case 'restore':       toast('Restore coming in Stage 9', { icon: 'fa-cloud-arrow-down' }); break;
-      case 'import-csv':    toast('Import coming in Stage 9', { icon: 'fa-file-import' }); break;
+      case 'search':        openView('search'); break;
+      case 'calendar':      openView('calendar'); break;
+      case 'history':       openView('history'); break;
+      case 'tools':         openToolsSheet(); break;
+      case 'reports':       toast('Reports coming in Chunk D', { icon: 'fa-chart-simple' }); break;
+      case 'settings':      toast('Settings coming in Chunk D', { icon: 'fa-gear' }); break;
+      case 'backup':        toast('Backup coming in Chunk D', { icon: 'fa-cloud-arrow-up' }); break;
+      case 'restore':       toast('Restore coming in Chunk D', { icon: 'fa-cloud-arrow-down' }); break;
+      case 'import-csv':    toast('Import coming in Chunk D', { icon: 'fa-file-import' }); break;
       case 'export-csv':    exportCSV(); break;
       case 'print':         window.print(); break;
       case 'compact':       document.body.classList.toggle('compact'); break;
@@ -899,6 +901,481 @@
     refreshData();
   }
 
+  /* ============================================================ */
+  /* Tools sheet                                                  */
+  /* ============================================================ */
+  function openToolsSheet() {
+    const sheet = document.createElement('div');
+    sheet.className = 'modal-sheet tools-sheet';
+    sheet.innerHTML = `
+      <div class="sheet-handle"></div>
+      <h3 class="sheet-title">Tools</h3>
+      <div class="tools-grid">
+        <button class="tool-tile" data-act="backup">
+          <i class="fa-solid fa-cloud-arrow-up"></i>
+          <span>Backup</span>
+        </button>
+        <button class="tool-tile" data-act="restore">
+          <i class="fa-solid fa-cloud-arrow-down"></i>
+          <span>Restore</span>
+        </button>
+        <button class="tool-tile" data-act="import-csv">
+          <i class="fa-solid fa-file-import"></i>
+          <span>Import CSV</span>
+        </button>
+        <button class="tool-tile" data-act="export-csv">
+          <i class="fa-solid fa-file-export"></i>
+          <span>Export CSV</span>
+        </button>
+        <button class="tool-tile" data-act="print">
+          <i class="fa-solid fa-print"></i>
+          <span>Print</span>
+        </button>
+        <button class="tool-tile" data-act="compact">
+          <i class="fa-solid fa-list"></i>
+          <span>Compact</span>
+        </button>
+        <button class="tool-tile danger" data-act="clear-completed">
+          <i class="fa-solid fa-trash-can"></i>
+          <span>Clear Completed</span>
+        </button>
+      </div>
+    `;
+    openModal(sheet);
+
+    sheet.querySelectorAll('.tool-tile').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const act = btn.dataset.act;
+        closeModal();
+        setTimeout(() => handleMenuAction(act), 100);
+      });
+    });
+  }
+
+  /* ============================================================ */
+  /* Views system                                                 */
+  /* ============================================================ */
+  const viewRoot = $('#viewRoot');
+
+  function openView(name, payload = {}) {
+    viewRoot.innerHTML = '';
+    viewRoot.hidden = false;
+    document.body.style.overflow = 'hidden';
+
+    const el = document.createElement('div');
+    el.className = 'view';
+    viewRoot.appendChild(el);
+
+    if (name === 'search') renderSearchView(el);
+    else if (name === 'calendar') renderCalendarView(el, payload);
+    else if (name === 'history') renderHistoryView(el, payload);
+  }
+
+  function closeView() {
+    viewRoot.hidden = true;
+    viewRoot.innerHTML = '';
+    document.body.style.overflow = '';
+  }
+
+  function viewHeaderHTML(title, rightHTML = '') {
+    return `
+      <div class="view-header">
+        <button class="view-back" data-act="back" aria-label="Back">
+          <i class="fa-solid fa-arrow-left"></i>
+        </button>
+        <h2 class="view-title">${escapeHTML(title)}</h2>
+        <div class="view-actions">${rightHTML}</div>
+      </div>`;
+  }
+
+  function highlightMatch(text, query) {
+    const t = String(text || '');
+    if (!query) return escapeHTML(t);
+    const lc = t.toLowerCase();
+    const lq = query.toLowerCase();
+    const idx = lc.indexOf(lq);
+    if (idx === -1) return escapeHTML(t);
+    return escapeHTML(t.slice(0, idx)) +
+           '<mark>' + escapeHTML(t.slice(idx, idx + query.length)) + '</mark>' +
+           escapeHTML(t.slice(idx + query.length));
+  }
+
+  /* ---------------------------------------------------------- */
+  /* Search view (Stage 5)                                       */
+  /* ---------------------------------------------------------- */
+  function renderSearchView(root) {
+    root.innerHTML = `
+      <div class="view-header view-header-search">
+        <button class="view-back" data-act="back" aria-label="Back">
+          <i class="fa-solid fa-arrow-left"></i>
+        </button>
+        <div class="search-input-wrap">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="searchViewInput" placeholder="Search subject, topic, notes…" autocomplete="off" spellcheck="false">
+          <button class="search-clear" id="searchClear" hidden aria-label="Clear">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+      <div class="view-body" id="searchResults"></div>
+    `;
+
+    const input = root.querySelector('#searchViewInput');
+    const clearBtn = root.querySelector('#searchClear');
+    const results = root.querySelector('#searchResults');
+
+    root.querySelector('[data-act="back"]').addEventListener('click', closeView);
+
+    const initial = '';
+    input.value = initial;
+    input.focus();
+
+    function render() {
+      const q = input.value.trim();
+      clearBtn.hidden = !q;
+
+      if (!q) {
+        results.innerHTML = `
+          <div class="search-hint">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <div class="search-hint-title">Search your topics</div>
+            <div class="search-hint-sub">Try a subject, a topic name, or words from your notes.</div>
+          </div>`;
+        return;
+      }
+
+      const lq = q.toLowerCase();
+      const matches = state.topics.filter((t) => {
+        return (t.subject || '').toLowerCase().includes(lq)
+            || (t.topic || '').toLowerCase().includes(lq)
+            || (t.notes || '').toLowerCase().includes(lq);
+      });
+
+      if (!matches.length) {
+        results.innerHTML = `
+          <div class="search-hint">
+            <i class="fa-solid fa-face-frown"></i>
+            <div class="search-hint-title">No matches</div>
+            <div class="search-hint-sub">Nothing found for "<strong>${escapeHTML(q)}</strong>".</div>
+          </div>`;
+        return;
+      }
+
+      results.innerHTML = '';
+      matches.forEach((t) => {
+        const status = Storage.deriveStatus(t);
+        const color = Storage.subjectColor(t.subject);
+        const row = document.createElement('button');
+        row.className = 'search-result';
+        row.innerHTML = `
+          <span class="subject-dot" style="background:${color}"></span>
+          <span class="search-result-body">
+            <span class="search-result-topic">${highlightMatch(t.topic, q)}</span>
+            <span class="search-result-sub">${highlightMatch(t.subject, q)}</span>
+          </span>
+          <span class="status-pill">${statusLabel(status)}</span>
+        `;
+        row.addEventListener('click', () => {
+          closeView();
+          setTimeout(() => openDetail(t.id), 100);
+        });
+        results.appendChild(row);
+      });
+    }
+
+    input.addEventListener('input', render);
+    clearBtn.addEventListener('click', () => {
+      input.value = '';
+      input.focus();
+      render();
+    });
+
+    render();
+  }
+
+  /* ---------------------------------------------------------- */
+  /* Calendar view (Stage 6)                                     */
+  /* ---------------------------------------------------------- */
+  function renderCalendarView(root, payload) {
+    let month = payload.month ? new Date(payload.month) : new Date();
+    month.setDate(1);
+
+    root.innerHTML = `
+      ${viewHeaderHTML('Calendar')}
+      <div class="cal-nav">
+        <button class="cal-arrow" data-act="prev" aria-label="Previous month">
+          <i class="fa-solid fa-chevron-left"></i>
+        </button>
+        <div class="cal-month" id="calMonth"></div>
+        <button class="cal-arrow" data-act="next" aria-label="Next month">
+          <i class="fa-solid fa-chevron-right"></i>
+        </button>
+      </div>
+      <div class="cal-today-wrap">
+        <button class="cal-today-btn" data-act="today">Today</button>
+      </div>
+      <div class="view-body">
+        <div class="cal-grid" id="calGrid"></div>
+      </div>
+    `;
+
+    root.querySelector('[data-act="back"]').addEventListener('click', closeView);
+    root.querySelector('[data-act="prev"]').addEventListener('click', () => {
+      month.setMonth(month.getMonth() - 1);
+      render();
+    });
+    root.querySelector('[data-act="next"]').addEventListener('click', () => {
+      month.setMonth(month.getMonth() + 1);
+      render();
+    });
+    root.querySelector('[data-act="today"]').addEventListener('click', () => {
+      month = new Date();
+      month.setDate(1);
+      render();
+    });
+
+    const monthLabel = root.querySelector('#calMonth');
+    const grid = root.querySelector('#calGrid');
+
+    function render() {
+      const year = month.getFullYear();
+      const m = month.getMonth();
+
+      monthLabel.textContent = month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+      const firstDow = new Date(year, m, 1).getDay();
+      const daysInMonth = new Date(year, m + 1, 0).getDate();
+      const prevMonthDays = new Date(year, m, 0).getDate();
+
+      // Build completion map for this month
+      const completions = Storage.getCompletions();
+      const counts = {};
+      completions.forEach((c) => {
+        const d = new Date(c.at);
+        if (d.getFullYear() === year && d.getMonth() === m) {
+          const k = d.getDate();
+          counts[k] = (counts[k] || 0) + 1;
+        }
+      });
+
+      const today = new Date();
+      const isThisMonth = today.getFullYear() === year && today.getMonth() === m;
+
+      const weekdays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+      let html = weekdays.map((w) => `<div class="cal-weekday">${w}</div>`).join('');
+
+      // Leading days from previous month
+      for (let i = firstDow - 1; i >= 0; i--) {
+        html += `<div class="cal-day out">${prevMonthDays - i}</div>`;
+      }
+
+      // Days of the month
+      for (let d = 1; d <= daysInMonth; d++) {
+        const count = counts[d] || 0;
+        const cls = [
+          'cal-day',
+          count ? 'has' : '',
+          isThisMonth && today.getDate() === d ? 'today' : ''
+        ].filter(Boolean).join(' ');
+        html += `
+          <button class="${cls}" data-day="${d}" ${count ? '' : 'disabled'}>
+            <span class="cal-day-num">${d}</span>
+            ${count ? `<span class="cal-day-count">${count}</span>` : ''}
+          </button>`;
+      }
+
+      // Trailing days
+      const used = firstDow + daysInMonth;
+      const trailing = (7 - (used % 7)) % 7;
+      for (let i = 1; i <= trailing; i++) {
+        html += `<div class="cal-day out">${i}</div>`;
+      }
+
+      grid.innerHTML = html;
+
+      grid.querySelectorAll('.cal-day.has').forEach((cell) => {
+        cell.addEventListener('click', () => {
+          showDayDetail(year, m, Number(cell.dataset.day));
+        });
+      });
+    }
+
+    function showDayDetail(year, m, day) {
+      const dayStart = new Date(year, m, day, 0, 0, 0, 0).getTime();
+      const dayEnd = dayStart + 86400000;
+      const items = Storage.getCompletions().filter((c) => {
+        const t = new Date(c.at).getTime();
+        return t >= dayStart && t < dayEnd;
+      });
+
+      const sheet = document.createElement('div');
+      sheet.className = 'modal-sheet day-sheet';
+      const dateLabel = new Date(year, m, day).toLocaleDateString(undefined, {
+        weekday: 'long', month: 'long', day: 'numeric'
+      });
+
+      sheet.innerHTML = `
+        <div class="sheet-handle"></div>
+        <h3 class="sheet-title">${escapeHTML(dateLabel)}</h3>
+        <div class="day-list">
+          ${items.map((c) => {
+            const color = Storage.subjectColor(c.subject);
+            const time = new Date(c.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+            return `
+              <button class="day-entry" data-topic-id="${c.topicId}">
+                <span class="subject-dot" style="background:${color}"></span>
+                <span class="day-entry-body">
+                  <span class="day-entry-step">${escapeHTML(c.stepLabel)}</span>
+                  <span class="day-entry-topic">${escapeHTML(c.topic)} · ${escapeHTML(c.subject)}</span>
+                </span>
+                <span class="day-entry-time">${escapeHTML(time)}</span>
+              </button>`;
+          }).join('')}
+        </div>
+        <div class="sheet-actions">
+          <button class="btn-primary" data-act="close">Done</button>
+        </div>
+      `;
+      openModal(sheet);
+
+      sheet.querySelector('[data-act="close"]').addEventListener('click', closeModal);
+      sheet.querySelectorAll('.day-entry').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.topicId;
+          closeModal();
+          closeView();
+          setTimeout(() => openDetail(id), 120);
+        });
+      });
+    }
+
+    render();
+  }
+
+  /* ---------------------------------------------------------- */
+  /* History view (Stage 7)                                      */
+  /* ---------------------------------------------------------- */
+  function renderHistoryView(root) {
+    let filter = 'all';
+
+    root.innerHTML = `
+      ${viewHeaderHTML('History')}
+      <div class="history-filter" id="historyFilter"></div>
+      <div class="view-body" id="historyBody"></div>
+    `;
+
+    root.querySelector('[data-act="back"]').addEventListener('click', closeView);
+
+    const filterBar = root.querySelector('#historyFilter');
+    const body = root.querySelector('#historyBody');
+
+    // Last 30 days
+    const cutoff = Date.now() - 30 * 86400000;
+
+    function buildSubjectList() {
+      const subjects = Array.from(new Set(
+        Storage.getCompletions().map((c) => c.subject).filter(Boolean)
+      )).sort((a, b) => a.localeCompare(b));
+      return subjects;
+    }
+
+    function renderFilters() {
+      const subjects = buildSubjectList();
+      const chips = ['all', ...subjects];
+      filterBar.innerHTML = chips.map((s) => {
+        const label = s === 'all' ? 'All' : s;
+        return `<button class="history-chip ${s === filter ? 'active' : ''}" data-filter="${escapeHTML(s)}">${escapeHTML(label)}</button>`;
+      }).join('');
+
+      filterBar.querySelectorAll('.history-chip').forEach((c) => {
+        c.addEventListener('click', () => {
+          filter = c.dataset.filter;
+          renderFilters();
+          renderEntries();
+        });
+      });
+    }
+
+    function dayKey(iso) {
+      const d = new Date(iso);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    function dayLabel(iso) {
+      const d = new Date(iso);
+      const today = new Date();
+      const yesterday = new Date(Date.now() - 86400000);
+      const sameDay = (a, b) =>
+        a.getFullYear() === b.getFullYear() &&
+        a.getMonth() === b.getMonth() &&
+        a.getDate() === b.getDate();
+      if (sameDay(d, today)) return 'Today';
+      if (sameDay(d, yesterday)) return 'Yesterday';
+      return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+    }
+
+    function renderEntries() {
+      let items = Storage.getCompletions().filter((c) => new Date(c.at).getTime() >= cutoff);
+      if (filter !== 'all') {
+        items = items.filter((c) => c.subject === filter);
+      }
+
+      if (!items.length) {
+        body.innerHTML = `
+          <div class="search-hint">
+            <i class="fa-solid fa-clock-rotate-left"></i>
+            <div class="search-hint-title">No history yet</div>
+            <div class="search-hint-sub">Completed steps from the last 30 days will appear here.</div>
+          </div>`;
+        return;
+      }
+
+      // Group by day
+      const groups = new Map();
+      items.forEach((c) => {
+        const k = dayKey(c.at);
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(c);
+      });
+
+      body.innerHTML = '';
+      groups.forEach((entries, key) => {
+        const day = document.createElement('div');
+        day.className = 'history-day';
+        day.innerHTML = `
+          <div class="history-day-label">${escapeHTML(dayLabel(entries[0].at))}</div>
+          <div class="history-entries"></div>
+        `;
+        const list = day.querySelector('.history-entries');
+
+        entries.forEach((c) => {
+          const color = Storage.subjectColor(c.subject);
+          const time = new Date(c.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+          const row = document.createElement('button');
+          row.className = 'history-entry';
+          row.innerHTML = `
+            <span class="subject-dot" style="background:${color}"></span>
+            <span class="history-entry-body">
+              <span class="history-entry-step">${escapeHTML(c.stepLabel)}</span>
+              <span class="history-entry-topic">${escapeHTML(c.topic)} · ${escapeHTML(c.subject)}</span>
+            </span>
+            <span class="history-entry-time">${escapeHTML(time)}</span>
+          `;
+          row.addEventListener('click', () => {
+            closeView();
+            setTimeout(() => openDetail(c.topicId), 100);
+          });
+          list.appendChild(row);
+        });
+
+        body.appendChild(day);
+      });
+    }
+
+    renderFilters();
+    renderEntries();
+  }
+
   init();
 
   /* ---------------------------------------------------------- */
@@ -906,6 +1383,7 @@
   /* ---------------------------------------------------------- */
   window.Studylog = {
     toast, dismissToast, openModal, closeModal,
+    openView, closeView,
     refreshData, relativeTime, escapeHTML,
     getState: () => state
   };
